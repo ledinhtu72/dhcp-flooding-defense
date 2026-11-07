@@ -1,0 +1,54 @@
+{
+  "name": "dhcp-flooding-defense",
+  "project_name": "DHCP Flooding Attack and Defense Using nftables Firewall",
+  "version": "1.0.0",
+  "labtainer_version": "v1.4.4n",
+  "description": "Labtainer lab simulating DHCP Flooding attack in a Dual-Subnet topology, defending at DHCP Relay with nftables rate-limiting & trusted MAC prioritization, capturing PCAPNG with Wireshark/TShark, and analyzing forensics with Zeek & Python.",
+  "github_repository": "https://github.com/ledinhtu72/dhcp-flooding-defense",
+  "dockerhub_namespace": "https://hub.docker.com/u/zeus183",
+  "dockerhub_main_repo": "https://hub.docker.com/r/zeus183/dhcp-flooding-defense",
+  "registry": "zeus183",
+  "networks": {
+    "INTERNAL_NET": {
+      "subnet": "192.168.0.0/24",
+      "gateway": "192.168.0.254"
+    },
+    "EXTERNAL_NET": {
+      "subnet": "10.10.0.0/24",
+      "gateway": "10.10.0.254"
+    }
+  },
+  "containers": {
+    "dhcpserver": {
+      "image": "zeus183/dhcp-flooding-defense.dhcpserver.student:latest",
+      "ip": "192.168.0.100",
+      "mac": "02:42:c0:a8:00:64",
+      "network": "INTERNAL_NET",
+      "terminals": 1
+    },
+    "dhcprelay": {
+      "image": "zeus183/dhcp-flooding-defense.dhcprelay.student:latest",
+      "ip_internal": "192.168.0.1",
+      "ip_external": "10.10.0.1",
+      "mac_internal": "02:42:c0:a8:00:01",
+      "mac_external": "02:42:0a:0a:00:01",
+      "network": ["INTERNAL_NET", "EXTERNAL_NET"],
+      "terminals": 1
+    },
+    "attacker": {
+      "image": "zeus183/dhcp-flooding-defense.attacker.student:latest",
+      "ip": "10.10.0.20",
+      "mac": "02:42:0a:0a:00:14",
+      "network": "EXTERNAL_NET",
+      "terminals": 1
+    },
+    "client": {
+      "image": "zeus183/dhcp-flooding-defense.client.student:latest",
+      "ip_init": "10.10.0.50",
+      "mac": "02:42:0a:0a:00:32",
+      "network": "EXTERNAL_NET",
+      "terminals": 1
+    }
+  }
+}
+

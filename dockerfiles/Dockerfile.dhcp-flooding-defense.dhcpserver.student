@@ -1,0 +1,18 @@
+# Dockerfile: DHCP Server container for dhcp-flooding-defense lab
+FROM huynguyen1324/dhcp-lab.dhcpserver.student:backup-orig
+
+LABEL version=3
+LABEL base=labtainers/labtainer.network.ssh2.5a46b1ccd9e9
+
+COPY dhcpserver/_system/ /
+RUN chmod +x /usr/local/bin/status_dhcp.sh /usr/local/bin/reset-leases.sh && \
+    touch /var/log/dhcp_server_status.log && \
+    chmod 666 /var/log/dhcp_server_status.log && \
+    rm -rf /var/labtainer/did_param /home/ubuntu/.local/result/* /home/ubuntu/.local/zip/* && \
+    : > /home/ubuntu/.local/.email && \
+    : > /home/ubuntu/.local/.labname && \
+    : > /home/ubuntu/.local/.seed && \
+    : > /home/ubuntu/.local/.watermark && \
+    chown -R ubuntu:ubuntu /home/ubuntu/.local
+
+USER root

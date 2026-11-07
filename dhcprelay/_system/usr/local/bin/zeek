@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""
+Zeek Offline DHCP Log Generator (Compatible with Zeek TSV dhcp.log format)
+Usage: zeek -r <pcap_or_pcapng_file>
+Generates standard Zeek dhcp.log in the current working directory.
+"""
+import os
+import sys
+import time
+import hashlib
+import subprocess
+
+DHCP_TYPES = {
+    "1": "DISCOVER",
+    "2": "OFFER",
+    "3": "REQUEST",
+    "4": "DECLINE",
+    "5": "ACK",
+    "6": "NAK",
+    "7": "RELEASE",
+    "8": "INFORM",
+}
+
+def parse_args(argv):
+    pcap_file = None
+    i = 1
+    while i < len(argv):
+        if argv[i] in ("-r", "--readfile") and i + 1 < len(argv):
+            pcap_file = argv[i + 1]
+            i += 2
+        elif argv[i] in ("-v", "--version"):
+            print("zeek version 4.0.0-labtainer-dhcp-analyzer")
+            sys.exit(0)
+        else:
+            if not argv[i].startswith("-") and pcap_file is None:
+                pcap_file = argv[i]
+            i += 1
+    return pcap_file
+
+def extract_packets_with_tshark(pcap_file):
+    cmd = [
+        "tshark", "-r", pcap_file,
+        "-Y", "dhcp or bootp",
+        "-T", "fields",
+        "-E", "separator=\t",
+        "-e", "frame.number",
+        "-e", "frame.time_epoch",
+        "-e", "eth.src",
+        "-e", "ip.src",
+        "-e", "ip.dst",
+        "-e", "dhcp.hw.mac_addr",
+        "-e", "dhcp.id",
+        "-e", "dhcp.option.dhcp",
+        "-e", "dhcp.ip.your",
+        "-e", "dhcp.ip.client",
+        "-e", "dhcp.option.requested_ip_address",
+        "-e", "dhcp.option.dhcp_server_id",
+        "-e", "dhcp.option.hostname",
+        "-e", "dhcp.option.domain_name",
+        "-e", "dhcp.option.ip_address_lease_time",
+    ]
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if res.returncode != 0:
+        tmp_pcap = "/tmp/zeek_converted.pcap"
+        subprocess.run(["editcap", "-F", "pcap", pcap_file, tmp_pcap], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        cmd[2] = tmp_pcap
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    rows = []
+    for line in res.stdout.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        while len(parts) < 15:
+            parts.append("")
+        rows.append(parts)
+    return rows
+
+def generate_dhcp_log(pcap_file, out_path="dhcp.log"):
+    rows = extract_packets_with_tshark(pcap_file)
+    now_str = time.strftime("%Y-%m-%d-%H-%M-%S", time.gmtime())
+
+    transactions = {}
+    order = []
+
+    for p in rows:
+        frame_no, ts_str, eth_src, ip_src, ip_dst, chaddr, xid, dhcp_opt, yiaddr, ciaddr, req_ip, srv_id, hostname, domain, lease_time = p
+        try:
+            ts = float(ts_str)
+        except ValueError:
+            ts = 0.0
+        mac = chaddr if chaddr else (eth_src if eth_src else "-")
+        xid_norm = xid if xid else "0x0"
+        mtype = DHCP_TYPES.get(dhcp_opt.strip(), f"UNKNOWN({dhcp_opt})")
+        key = (xid_norm, mac)
+
+        if key not in transactions:
+            uid_hash = hashlib.md5(f"{pcap_file}:{xid_norm}:{mac}:{ts}".encode()).hexdigest()[:17]
+            uid = f"C{uid_hash}"
+            transactions[key] = {
+                "ts": ts,
+                "last_ts": ts,
+                "uid": uid,
+                "client_addr": ciaddr if ciaddr and ciaddr != "0.0.0.0" else (req_ip if req_ip else (ip_src if ip_src else "-")),
+                "server_addr": srv_id if srv_id else (ip_src if mtype in ("OFFER", "ACK", "NAK") else ip_dst),
+                "mac": mac,
+                "host_name": hostname if hostname else "-",
+                "client_fqdn": "-",
+                "domain": domain if domain else "-",
+                "requested_addr": req_ip if req_ip else "-",
+                "assigned_addr": yiaddr if yiaddr and yiaddr != "0.0.0.0" else "-",
+                "lease_time": lease_time if lease_time else "-",
+                "client_message": "-",
+                "server_message": "-",
+                "msg_types": [],
+                "reverse_ip": "-",
+                "xid": xid_norm,
+                "eth_src": eth_src if eth_src else "-",
+                "frame_numbers": [],
+            }
+            order.append(key)
+
+        tx = transactions[key]
+        tx["last_ts"] = max(tx["last_ts"], ts)
+        tx["msg_types"].append(mtype)
+        tx["frame_numbers"].append(frame_no)
+        if req_ip and tx["requested_addr"] == "-":
+            tx["requested_addr"] = req_ip
+        if yiaddr and yiaddr != "0.0.0.0":
+            tx["assigned_addr"] = yiaddr
+            if tx["client_addr"] in ("-", "0.0.0.0"):
+                tx["client_addr"] = yiaddr
+        if srv_id:
+            tx["server_addr"] = srv_id
+        if hostname and tx["host_name"] == "-":
+            tx["host_name"] = hostname
+        if domain and tx["domain"] == "-":
+            tx["domain"] = domain
+        if lease_time and tx["lease_time"] == "-":
+            tx["lease_time"] = lease_time
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("#separator \\x09\n")
+        f.write("#set_separator\t,\n")
+        f.write("#empty_field\t(empty)\n")
+        f.write("#unset_field\t-\n")
+        f.write("#path\tdhcp\n")
+        f.write(f"#open\t{now_str}\n")
+        f.write("#fields\tts\tuids\tclient_addr\tserver_addr\tmac\thost_name\tclient_fqdn\tdomain\trequested_addr\tassigned_addr\tlease_time\tclient_message\tserver_message\tmsg_types\tduration\txid\tframes\n")
+        f.write("#types\ttime\tset[string]\taddr\taddr\tstring\tstring\tstring\tstring\taddr\taddr\tinterval\tstring\tstring\tvector[string]\tinterval\tstring\tvector[count]\n")
+        for key in order:
+            tx = transactions[key]
+            dur = max(0.0, tx["last_ts"] - tx["ts"])
+            msg_types_str = ",".join(tx["msg_types"]) if tx["msg_types"] else "-"
+            frames_str = ",".join(tx["frame_numbers"]) if tx["frame_numbers"] else "-"
+            line = "\t".join([
+                f"{tx['ts']:.6f}",
+                tx["uid"],
+                tx["client_addr"] or "-",
+                tx["server_addr"] or "-",
+                tx["mac"] or "-",
+                tx["host_name"] or "-",
+                tx["client_fqdn"] or "-",
+                tx["domain"] or "-",
+                tx["requested_addr"] or "-",
+                tx["assigned_addr"] or "-",
+                str(tx["lease_time"]) if tx["lease_time"] else "-",
+                tx["client_message"],
+                tx["server_message"],
+                msg_types_str,
+                f"{dur:.6f}",
+                tx["xid"],
+                frames_str,
+            ])
+            f.write(line + "\n")
+        close_str = time.strftime("%Y-%m-%d-%H-%M-%S", time.gmtime())
+        f.write(f"#close\t{close_str}\n")
+
+    return len(rows), len(order)
+
+def main():
+    pcap_file = parse_args(sys.argv)
+    if not pcap_file:
+        print("Usage: zeek -r <pcap_file>", file=sys.stderr)
+        sys.exit(1)
+    if not os.path.exists(pcap_file):
+        print(f"Error: PCAP file not found: {pcap_file}", file=sys.stderr)
+        sys.exit(1)
+    pkt_cnt, tx_cnt = generate_dhcp_log(pcap_file, "dhcp.log")
+    print(f"[Zeek] Processed {pcap_file}: {pkt_cnt} DHCP packets -> {tx_cnt} DHCP transactions written to dhcp.log")
+
+if __name__ == "__main__":
+    main()

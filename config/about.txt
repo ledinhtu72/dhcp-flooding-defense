@@ -1,0 +1,2 @@
+Lab thực hành mô phỏng tấn công DHCP Flooding có kiểm soát qua DHCP Relay, bắt gói tin với TShark/Wireshark, phân tích Forensics bằng Zeek + Python và triển khai phòng thủ bằng tường lửa nftables.
+

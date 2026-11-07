@@ -1,0 +1,40 @@
+#!/usr/sbin/nft -f
+# =============================================================================
+# Bộ quy tắc tường lửa nftables chống tấn công DHCP Flooding trên DHCP Relay
+# Tệp cấu hình: /etc/nftables_dhcp_defense.nft
+# Lệnh kích hoạt: nft -f /etc/nftables_dhcp_defense.nft
+# Lệnh kiểm tra : nft list table inet dhcp_defense
+# Lệnh gỡ bỏ   : nft delete table inet dhcp_defense
+# Lưu ý an toàn : KHÔNG dùng 'flush ruleset' để bảo toàn các chuỗi NAT/Bridge của Docker.
+# =============================================================================
+
+table netdev dhcp_defense_ingress
+flush table netdev dhcp_defense_ingress
+
+table netdev dhcp_defense_ingress {
+    chain external_in {
+        type filter hook ingress device "eth0" priority 0; policy accept;
+        udp dport 67 counter comment "external_dhcp_rx"
+    }
+}
+
+table inet dhcp_defense
+flush table inet dhcp_defense
+
+table inet dhcp_defense {
+    chain relay_out {
+        type filter hook output priority 0; policy accept;
+
+        # 1. Ưu tiên Client hợp lệ đã biết qua trường BOOTP chaddr (@th,288,48 = 02:42:0a:0a:00:32)
+        ip saddr 192.168.0.1 ip daddr 192.168.0.100 udp dport 67 @th,288,48 0x02420a0a0032 limit rate 10/second burst 10 packets counter accept comment "trusted_client_accept"
+
+        # 2. Giới hạn tốc độ (Rate-Limit) tổng lưu lượng DHCP chuyển tiếp: tối đa 3 gói/giây (burst 6 gói)
+        ip saddr 192.168.0.1 ip daddr 192.168.0.100 udp dport 67 limit rate 3/second burst 6 packets counter accept comment "dhcp_rate_limit_accept"
+
+        # 3. Ghi log có kiểm soát (tối đa 5 bản ghi/phút)
+        ip saddr 192.168.0.1 ip daddr 192.168.0.100 udp dport 67 limit rate 5/minute burst 5 packets counter log prefix "[NFT-DHCP-FLOOD-DROP] " comment "dhcp_flood_log"
+
+        # 4. Chặn (DROP) toàn bộ gói tin DHCP Flooding vượt ngưỡng trước khi tới DHCP Server
+        ip saddr 192.168.0.1 ip daddr 192.168.0.100 udp dport 67 counter drop comment "dhcp_flood_drop"
+    }
+}

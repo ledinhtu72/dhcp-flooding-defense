@@ -1,0 +1,22 @@
+# Sensitive files and credentials (NEVER commit or package)
+.env
+*.env
+*token*
+*secret*
+*credential*
+*.pem
+*.key
+
+# Temporary & runtime files
+__pycache__/
+*.pyc
+*.pyo
+*.log
+*.swp
+*~
+.tmp/
+seed_dir/
+captures/*.pcap*
+analysis/*
+reports/*
+

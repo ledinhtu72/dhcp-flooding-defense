@@ -1,0 +1,45 @@
+# Dockerfile: DHCP Relay + nftables Firewall + Wireshark/TShark/Zeek Sensor for dhcp-flooding-defense lab
+FROM labtainers/labtainer.wireshark2:latest AS wireshark_src
+FROM huynguyen1324/dhcp-lab.attacker.student:backup-orig AS attacker_src
+FROM huynguyen1324/dhcp-lab.dhcprelay.student:backup-orig
+
+LABEL version=3
+LABEL base=labtainers/labtainer.network.ssh2.5a46b1ccd9e9
+
+# 1. Copy Wireshark GUI, TShark, dumpcap, capinfos, editcap, mergecap and required libraries
+COPY --from=wireshark_src /usr/bin/wireshark /usr/bin/wireshark
+COPY --from=attacker_src /usr/bin/tshark /usr/bin/tshark
+COPY --from=attacker_src /usr/bin/dumpcap /usr/bin/dumpcap
+COPY --from=attacker_src /usr/bin/capinfos /usr/bin/capinfos
+COPY --from=attacker_src /usr/bin/editcap /usr/bin/editcap
+COPY --from=attacker_src /usr/bin/mergecap /usr/bin/mergecap
+COPY --from=wireshark_src /usr/lib/x86_64-linux-gnu/ /usr/lib/x86_64-linux-gnu/
+COPY --from=attacker_src /usr/lib/x86_64-linux-gnu/libwireshark.so* /usr/lib/x86_64-linux-gnu/
+COPY --from=attacker_src /usr/lib/x86_64-linux-gnu/libwiretap.so* /usr/lib/x86_64-linux-gnu/
+COPY --from=attacker_src /usr/lib/x86_64-linux-gnu/libwsutil.so* /usr/lib/x86_64-linux-gnu/
+COPY --from=attacker_src /usr/lib/x86_64-linux-gnu/wireshark/ /usr/lib/x86_64-linux-gnu/wireshark/
+COPY --from=attacker_src /usr/share/wireshark/ /usr/share/wireshark/
+COPY --from=attacker_src /usr/lib/python3/dist-packages/scapy/ /usr/lib/python3/dist-packages/scapy/
+
+# 2. Copy role _system files (nftables ruleset, capture, firewall, Zeek/Python analysis scripts)
+COPY dhcprelay/_system/ /
+RUN chmod +x /usr/local/bin/start-capture.sh \
+             /usr/local/bin/stop-capture.sh \
+             /usr/local/bin/firewall-enable.sh \
+             /usr/local/bin/firewall-disable.sh \
+             /usr/local/bin/firewall-status.sh \
+             /usr/local/bin/zeek \
+             /usr/local/bin/analyze_dhcp.py \
+             /usr/local/bin/analyze.sh && \
+    mkdir -p /home/ubuntu/captures /home/ubuntu/analysis /home/ubuntu/reports /var/log/captures && \
+    touch /var/log/captures/capture_status.log /var/log/firewall_status.log /var/log/dhcp_analysis_report.txt && \
+    chmod 666 /var/log/captures/capture_status.log /var/log/firewall_status.log /var/log/dhcp_analysis_report.txt && \
+    rm -rf /var/labtainer/did_param /home/ubuntu/.local/result/* /home/ubuntu/.local/zip/* && \
+    : > /home/ubuntu/.local/.email && \
+    : > /home/ubuntu/.local/.labname && \
+    : > /home/ubuntu/.local/.seed && \
+    : > /home/ubuntu/.local/.watermark && \
+    chown -R ubuntu:ubuntu /home/ubuntu && \
+    chmod -R 777 /home/ubuntu/captures /home/ubuntu/analysis /home/ubuntu/reports /var/log/captures
+
+USER root

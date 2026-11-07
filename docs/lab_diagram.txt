@@ -1,0 +1,50 @@
+======================================================================================
+            SƠ ĐỒ KIẾN TRÚC MẠNG BÀI LAB: DHCP-FLOODING-DEFENSE
+======================================================================================
+
+  [ INTERNAL_NET: 192.168.0.0/24 ]             [ EXTERNAL_NET: 10.10.0.0/24 ]
+  
+  +------------------------------+             +------------------------------+
+  |         dhcpserver           |             |           attacker           |
+  |     ISC DHCP Server 4.4      |             |   Kali Attacker (Scapy/CLI)  |
+  |   IP : 192.168.0.100 (eth0)  |             |   MAC: 02:42:0a:0a:00:14     |
+  |   MAC: 02:42:c0:a8:00:64     |             |   Tool: attack-controlled.sh |
+  |   Pool: 10.10.0.100 - .130   |             +--------------+---------------+
+  +--------------+---------------+                            |
+                 |                                            | (DHCP Broadcast
+                 | (Unicast UDP 67)                           |  255.255.255.255:67)
+                 |                                            v
+                 |             +------------------------------+---------------+
+                 |             |                  dhcprelay                   |
+                 |             |  1. ISC DHCP Relay (dhcrelay)                |
+                 +-------------+     - eth0 (INTERNAL): 192.168.0.1           |
+                   [PCAP Tap]  |     - eth1 (EXTERNAL): 10.10.0.1             |
+                   [nftables   |  2. Firewall: nftables (table inet/netdev)   |
+                    relay_out] |  3. Sensor  : TShark / dumpcap / Wireshark   |
+                               |  4. Analysis: Zeek (dhcp.log) + Python3      |
+                               +------------------------------+---------------+
+                                                              ^
+                                                              | (DHCP DORA)
+                                               +--------------+---------------+
+                                               |            client            |
+                                               |   Ubuntu Legitimate Client   |
+                                               |   MAC: 02:42:0a:0a:00:32     |
+                                               |   Tool: dhclient / client-test|
+                                               +------------------------------+
+
+======================================================================================
+LUỒNG ĐI CỦA GÓI TIN & ĐIỂM KIỂM SOÁT (CHOKE POINT):
+1. Attacker / Client gửi gói DHCP Broadcast (UDP 68 -> 67) trên EXTERNAL_NET (eth1).
+2. Hook `netdev ingress` (table `dhcp_defense_ingress`) trên eth1 của `dhcprelay` đếm
+   tổng lưu lượng DHCP Broadcast đi vào từ EXTERNAL_NET (`external_dhcp_rx`).
+3. Tiến trình `dhcrelay` nhận gói và chuyển tiếp bằng gói UDP Unicast (192.168.0.1:67
+   -> 192.168.0.100:67) đi ra cổng eth0 (INTERNAL_NET).
+4. Hook `inet output` (chain `relay_out` trong table `dhcp_defense`) lọc gói tin TRƯỚC KHI
+   gói tin đi ra eth0:
+   - Ưu tiên cho phép Client hợp lệ (@th,288,48 == 0x02420a0a0032).
+   - Giới hạn tốc độ (rate-limit 2/second burst 3) với các yêu cầu DHCP khác.
+   - Drop toàn bộ gói tin Flood vượt ngưỡng (`dhcp_flood_drop`).
+5. PCAP Sensor (`start-capture.sh`) bắt gói trên `eth0` (sau Firewall), ghi nhận chính
+   xác lưu lượng thực tế đến được `dhcpserver`.
+======================================================================================
+

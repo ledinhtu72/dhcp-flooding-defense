@@ -1,0 +1,18 @@
+# Dockerfile: Kali Attacker container for dhcp-flooding-defense lab
+FROM huynguyen1324/dhcp-lab.attacker.student:backup-orig
+
+LABEL version=3
+LABEL base=labtainers/labtainer.network.ssh2.5a46b1ccd9e9
+
+COPY attacker/_system/ /
+RUN chmod +x /usr/local/bin/attack-controlled.sh /usr/local/bin/attack-stop.sh /home/ubuntu/dhcp_flood_scapy.py && \
+    touch /var/log/attack_flood.log && \
+    chmod 666 /var/log/attack_flood.log && \
+    rm -rf /var/labtainer/did_param /home/ubuntu/.local/result/* /home/ubuntu/.local/zip/* && \
+    : > /home/ubuntu/.local/.email && \
+    : > /home/ubuntu/.local/.labname && \
+    : > /home/ubuntu/.local/.seed && \
+    : > /home/ubuntu/.local/.watermark && \
+    chown -R ubuntu:ubuntu /home/ubuntu/.local /home/ubuntu/dhcp_flood_scapy.py
+
+USER root
